@@ -55,10 +55,10 @@ state_fix = {
     "andaman and nicobar islands": "Andaman & Nicobar Islands",
     "orissa": "Odisha",
     "odissa": "Odisha",
-    "dadra & nagar haveli and daman and diu": "Dadra & Nagar Haveli ",
-    "dadra & nagar haveli": "Dadra & Nagar Haveli ",
+    "dadra & nagar haveli ": "Dadra & Nagar Haveli ",
+   
     "daman & diu": "Daman & Diu",
-    "dadra and nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
+    "dadra and nagar haveli": "Dadra & Nagar Haveli",
     "dadra and nagar haveli ": "Dadra & Nagar Haveli ",
     "pondicherry":"puducherry",
     "jammu & kashmir":"jammu and kashmir" 
