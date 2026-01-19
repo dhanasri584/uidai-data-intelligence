@@ -46,6 +46,7 @@ df["total_enrolments"] = df[["age_0_5", "age_5_17", "age_18_greater"]].sum(axis=
 df = df.dropna(subset=["date"])
 
 # ---------------- STATE STANDARDIZATION ----------------
+# ---------------- STATE STANDARDIZATION ----------------
 state_fix = {
     "west bengal": "West Bengal",
     "west bangal": "West Bengal",
@@ -61,13 +62,28 @@ state_fix = {
     "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu"
 }
 
+# Standardize state names
 df["state_clean"] = (
     df["state"].astype(str)
       .str.lower()
       .str.strip()
       .replace(state_fix)
-      .str.title()
 )
+
+# Optional: make a display-friendly version
+df["state_display"] = df["state_clean"].str.title()
+
+# ---------------- AGGREGATION ----------------
+# Group by the cleaned state
+daily = df.groupby(["state_clean", "date"]).agg(
+    total_enrolments=("total_enrolments", "sum"),
+    age_0_5=("age_0_5", "sum"),
+    age_5_17=("age_5_17", "sum"),
+    age_18_greater=("age_18_greater", "sum")
+).reset_index()
+
+# Make sure no duplicate states exist
+daily = daily.drop_duplicates(subset=["state_clean", "date"])
 
 # ---------------- DAILY AGGREGATION ----------------
 daily = df.groupby(["state_clean", "date"]).agg(
