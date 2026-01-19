@@ -82,6 +82,8 @@ daily["baseline"] = (
     .reset_index(level=0, drop=True)
 )
 
+# Avoid division by zero
+daily["baseline"] = daily["baseline"].replace(0, 1e-6)
 daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline"]) / daily["baseline"]
 
 # ---------------- COVERAGE SCORE ----------------
@@ -105,8 +107,6 @@ stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
 stability["stability_score"] = (1 - stability["deviation"]).round(2)
 
 # ---------------- FORECAST ----------------
-# ---------------- BASELINE FORECAST ----------------
-
 # last 7 days per state
 forecast_window = (
     daily.sort_values("date")
@@ -151,14 +151,11 @@ forecast_df = pd.merge(
 forecast_df["7_day_forecast"] = (
     forecast_df["baseline"] * (1 + forecast_df["baseline_growth"])
 ).round(0)
-final = final.merge(forecast_df, on="state_clean", how="left")
-
-
 
 # ---------------- MERGE ALL ----------------
 final = stability.merge(coverage, on="state_clean")
 final = final.merge(volatility, on="state_clean")
-final = final.merge(forecast_df, on="state_clean")
+final = final.merge(forecast_df[["state_clean", "7_day_forecast"]], on="state_clean", how="left")
 
 # ---------------- RECOMMENDATIONS ----------------
 def uidai_action(row):
