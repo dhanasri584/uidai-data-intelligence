@@ -8,16 +8,25 @@ st.set_page_config(page_title="UIDAI Data Intelligence Studio", layout="wide")
 st.title("🆔 UIDAI Enrolment Data Intelligence Studio")
 st.caption("Standardization • Anomalies • Baseline Trends • Geo Insights")
 
-@st.cache_data
-def load_data():
-    files = [
-        "api_data_aadhar_enrolment_0_500000.csv",
-        "api_data_aadhar_enrolment_500000_1000000.csv",
-        "api_data_aadhar_enrolment_1000000_1006029.csv"
-    ]
-    return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+st.subheader("📂 Upload UIDAI Enrolment CSV Files")
 
-df = load_data()
+uploaded_files = st.file_uploader(
+    "Upload one or multiple UIDAI enrolment CSV files",
+    type="csv",
+    accept_multiple_files=True
+)
+
+if not uploaded_files:
+    st.warning("Please upload UIDAI enrolment CSV files to proceed.")
+    st.stop()
+
+@st.cache_data
+def load_data(files):
+    dfs = [pd.read_csv(f) for f in files]
+    return pd.concat(dfs, ignore_index=True)
+
+df = load_data(uploaded_files)
+
 
 # Auto detect columns
 state_col = [c for c in df.columns if "state" in c.lower()][0]
