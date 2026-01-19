@@ -105,11 +105,55 @@ stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
 stability["stability_score"] = (1 - stability["deviation"]).round(2)
 
 # ---------------- FORECAST ----------------
-AttributeError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
-Traceback:
-File "/mount/src/uidai-data-intelligence/app.py", line 110, in <module>
-    growth = forecast.groupby("state_clean")["baseline"].pct_change().mean().reset_index()
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ---------------- BASELINE FORECAST ----------------
+
+# last 7 days per state
+forecast_window = (
+    daily.sort_values("date")
+    .groupby("state_clean")
+    .tail(7)
+    .copy()
+)
+
+# percent growth in baseline
+forecast_window["baseline_growth"] = (
+    forecast_window
+    .groupby("state_clean")["baseline"]
+    .pct_change()
+)
+
+# average growth rate per state
+growth_rate = (
+    forecast_window
+    .groupby("state_clean")["baseline_growth"]
+    .mean()
+    .fillna(0)
+    .reset_index()
+)
+
+# last baseline value per state
+last_baseline = (
+    forecast_window
+    .groupby("state_clean")["baseline"]
+    .last()
+    .reset_index()
+)
+
+# merge forecast inputs
+forecast_df = pd.merge(
+    last_baseline,
+    growth_rate,
+    on="state_clean",
+    how="left"
+)
+
+# compute 7-day forecast
+forecast_df["7_day_forecast"] = (
+    forecast_df["baseline"] * (1 + forecast_df["baseline_growth"])
+).round(0)
+final = final.merge(forecast_df, on="state_clean", how="left")
+
+
 
 # ---------------- MERGE ALL ----------------
 final = stability.merge(coverage, on="state_clean")
