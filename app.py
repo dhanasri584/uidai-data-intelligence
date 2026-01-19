@@ -1,64 +1,73 @@
+import os
+import json
+import requests
 import pandas as pd
-import numpy as np
 import streamlit as st
 import plotly.express as px
 
+# ---------------- CONFIG ----------------
 st.set_page_config(
-    page_title="UIDAI Data Intelligence Dashboard",
+    page_title="UIDAI Data Intelligence Platform",
     layout="wide"
 )
 
-st.title("🆔 UIDAI Enrolment Data Intelligence Dashboard")
-st.caption("State anomalies • Clean baselines • Geo insights • Operational recommendations")
+st.title("🆔 UIDAI Aadhaar Enrolment Data Intelligence Platform")
+st.caption("State Standardization • Baseline Analysis • Anomaly Detection • Geo-Visualisation")
 
-# ---------------- FILE UPLOAD ----------------
-uploaded_files = st.file_uploader(
-    "📂 Upload UIDAI Enrolment CSV Files",
-    type="csv",
-    accept_multiple_files=True
-)
-
-if not uploaded_files:
-    st.info("Upload UIDAI enrolment CSV files to start analysis")
-    st.stop()
+# ---------------- LOAD DATA ----------------
+@st.cache_data
+def load_data():
+    files = [
+        "api_data_aadhar_enrolment_0_500000.csv",
+        "api_data_aadhar_enrolment_500000_1000000.csv",
+        "api_data_aadhar_enrolment_1000000_1006029.csv"
+    ]
+    df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+    return df
 
 @st.cache_data
-def load_data(files):
-    return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+def load_india_geojson():
+    url = "https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson"
+    return requests.get(url).json()
 
-df = load_data(uploaded_files)
-
-# ---------------- AUTO COLUMN DETECTION ----------------
-state_col = [c for c in df.columns if "state" in c.lower()][0]
-date_col = [c for c in df.columns if "date" in c.lower()][0]
-age_cols = [c for c in df.columns if "age" in c.lower()]
-
-df["total_enrolments"] = df[age_cols].sum(axis=1)
+df = load_data()
+india_geojson = load_india_geojson()
 
 # ---------------- STATE STANDARDIZATION ----------------
-state_map = {
-    "orissa": "Odisha",
-    "odisa": "Odisha",
+state_mapping = {
+    "west bengal": "West Bengal",
+    "west  bengal": "West Bengal",
     "west bangal": "West Bengal",
     "westbengal": "West Bengal",
-    "andaman & nicobar": "Andaman & Nicobar Islands",
+    "andhra pradesh": "Andhra Pradesh",
+    "andaman and nicobar islands": "Andaman & Nicobar Islands",
+    "dadra and nagar haveli": "Dadra & Nagar Haveli",
+    "daman and diu": "Daman & Diu",
 }
 
-df["state_original"] = df[state_col]
+df["state_original"] = df["state"]
+
 df["state_clean"] = (
-    df[state_col]
+    df["state"]
     .astype(str)
     .str.lower()
     .str.strip()
-    .replace(state_map)
+    .replace(state_mapping)
     .str.title()
 )
 
-# ---------------- DATE CLEAN ----------------
-df["date"] = pd.to_datetime(df[date_col], errors="coerce")
+# ---------------- DATE & ENROLMENT ----------------
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+df["total_enrolments"] = (
+    df["age_0_5"] +
+    df["age_5_17"] +
+    df["age_18_greater"]
+)
+
 df = df.dropna(subset=["date"])
 
-# ---------------- DAILY AGGREGATION ----------------
+# ---------------- BASELINE SERIES ----------------
 daily = (
     df.groupby(["state_clean", "date"])["total_enrolments"]
     .sum()
@@ -73,127 +82,112 @@ daily["baseline"] = (
 )
 
 daily["deviation_pct"] = (
-    (daily["total_enrolments"] - daily["baseline"])
-    / daily["baseline"] * 100
+    (daily["total_enrolments"] - daily["baseline"]) / daily["baseline"]
+).abs()
+
+daily["anomaly"] = daily["deviation_pct"] > 0.5
+
+# ---------------- LATEST SNAPSHOT ----------------
+latest = daily.sort_values("date").groupby("state_clean").tail(1)
+
+# ---------------- INDIA MAP ----------------
+st.markdown("## 🗺️ India Aadhaar Enrolment Heatmap")
+
+latest["state_match"] = latest["state_clean"].str.upper().str.strip()
+
+fig_map = px.choropleth(
+    latest,
+    geojson=india_geojson,
+    featureidkey="properties.ST_NM",
+    locations="state_match",
+    color="total_enrolments",
+    color_continuous_scale="YlOrRd",
+    title="Latest Aadhaar Enrolments by State"
 )
 
-daily["anomaly"] = abs(daily["deviation_pct"]) > 50
+fig_map.update_geos(fitbounds="locations", visible=False)
+fig_map.update_layout(height=650)
 
-# ---------------- KPI CARDS ----------------
-st.markdown("## 📊 Key Metrics")
+st.plotly_chart(fig_map, use_container_width=True)
 
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("Total Records", len(df))
-col2.metric("Raw State Names", df["state_original"].nunique())
-col3.metric("Standardized States", df["state_clean"].nunique())
-col4.metric("Anomaly Points", daily["anomaly"].sum())
-
-# ---------------- DATA PREVIEW ----------------
-st.markdown("## 📄 Raw Data Preview")
-st.dataframe(df.head(10), use_container_width=True)
-
-# ---------------- STATE ANOMALIES ----------------
-st.markdown("## ⚠️ State Naming Anomalies")
+# ---------------- STANDARDIZATION IMPACT ----------------
+st.markdown("## 🧹 State Name Standardization Impact")
 
 variants = (
     df.groupby("state_clean")["state_original"]
     .nunique()
     .reset_index(name="name_variants")
-    .sort_values("name_variants", ascending=False)
 )
 
 st.dataframe(variants[variants["name_variants"] > 1], use_container_width=True)
 
-pie = pd.DataFrame({
-    "Category": ["Already Clean", "Auto-Standardized"],
-    "Count": [
-        (df["state_original"] == df["state_clean"]).sum(),
-        (df["state_original"] != df["state_clean"]).sum()
-    ]
-})
+# ---------------- UNDER-ENROLLED STATES ----------------
+st.markdown("## 🚨 Under-Enrolled States vs Baseline")
 
-fig_pie = px.pie(
-    pie,
-    names="Category",
-    values="Count",
-    title="State Standardization Impact"
-)
-st.plotly_chart(fig_pie, use_container_width=True)
+under = latest[latest["total_enrolments"] < latest["baseline"]]
 
-# ---------------- BASELINE TREND ----------------
-st.markdown("## 📈 Baseline Enrolment Trends")
-
-state_sel = st.selectbox(
-    "Select State for Trend Analysis",
-    sorted(daily["state_clean"].unique())
+st.dataframe(
+    under[["state_clean", "total_enrolments", "baseline"]],
+    use_container_width=True
 )
 
-trend_df = daily[daily["state_clean"] == state_sel]
+# ---------------- VOLATILITY ----------------
+st.markdown("## ⚠️ High Volatility States")
 
-fig_line = px.line(
-    trend_df,
-    x="date",
-    y=["total_enrolments", "baseline"],
-    labels={"value": "Enrolments", "variable": "Series"},
-    title=f"Actual vs Baseline Enrolments — {state_sel}"
+volatility = (
+    daily.groupby("state_clean")["deviation_pct"]
+    .std()
+    .sort_values(ascending=False)
+    .head(10)
+    .reset_index()
 )
 
-st.plotly_chart(fig_line, use_container_width=True)
-
-# ---------------- INDIA MAP ----------------
-st.markdown("## 🗺️ India Enrolment Heatmap")
-
-latest = (
-    daily.sort_values("date")
-    .groupby("state_clean")
-    .tail(1)
+fig_vol = px.bar(
+    volatility,
+    x="deviation_pct",
+    y="state_clean",
+    orientation="h",
+    title="State-wise Reporting Volatility"
 )
 
-fig_map = px.choropleth(
-    latest,
-    locations="state_clean",
-    locationmode="country names",
-    color="total_enrolments",
-    title="Latest Aadhaar Enrolments by State",
-    scope="asia",
-    color_continuous_scale="Blues"
+st.plotly_chart(fig_vol, use_container_width=True)
+
+# ---------------- DATA INTEGRITY SCORE ----------------
+st.markdown("## 🧬 State Data Integrity Score")
+
+integrity = daily.groupby("state_clean").agg(
+    anomaly_rate=("anomaly", "mean"),
+    avg_deviation=("deviation_pct", "mean")
+).reset_index()
+
+integrity["integrity_score"] = (
+    100 - (integrity["anomaly_rate"] * 100)
+).clip(0, 100)
+
+fig_integrity = px.bar(
+    integrity.sort_values("integrity_score"),
+    x="integrity_score",
+    y="state_clean",
+    orientation="h",
+    title="UIDAI State Data Integrity Index"
 )
 
-fig_map.update_geos(
-    center={"lat": 22, "lon": 78},
-    projection_scale=4,
-    visible=False
-)
+st.plotly_chart(fig_integrity, use_container_width=True)
 
-st.plotly_chart(fig_map, use_container_width=True)
+# ---------------- EXECUTIVE INSIGHTS ----------------
+st.markdown("## 📝 Executive Insights for UIDAI")
 
-# ---------------- RECOMMENDATIONS ----------------
-st.markdown("## 🧠 System Recommendations")
+st.markdown(f"""
+• {df['state_original'].nunique()} raw state naming formats detected  
+• {variants[variants['name_variants'] > 1].shape[0]} states required normalization  
+• {daily['anomaly'].sum()} anomalous enrolment days identified  
+• Highest volatility observed in **{volatility.iloc[0]['state_clean']}**
 
-high_variants = variants[variants["name_variants"] > 3]
-high_anomalies = daily[daily["anomaly"] == True]["state_clean"].value_counts()
-
-st.markdown("### Key Observations")
-st.write(f"• {len(high_variants)} states have high naming inconsistencies")
-st.write(f"• {len(high_anomalies)} states show abnormal enrolment behavior")
-
-st.markdown("### Recommended Actions")
-st.markdown("""
-• Enforce state standardization at data entry level  
-• Validate enrolment spikes before forecasting  
-• Allocate biometric kits based on baseline demand  
-• Exclude anomalous periods from policy decisions  
+### Recommendations:
+✔ Enforce state naming standards at source  
+✔ Deploy mobile enrolment units in underperforming states  
+✔ Flag high-volatility regions for audit  
+✔ Use baseline deviation alerts for real-time monitoring  
 """)
 
-# ---------------- DOWNLOAD ----------------
-st.markdown("## ⬇️ Download Cleaned Data")
-
-csv = df.to_csv(index=False).encode("utf-8")
-st.download_button(
-    "Download Cleaned UIDAI Dataset",
-    csv,
-    file_name="uidai_cleaned_enrolment_data.csv",
-    mime="text/csv"
-)
-
-st.success("✅ Dashboard ready — shareable, scalable, and judge-ready")
+st.success("✅ UIDAI Data Intelligence Platform Loaded Successfully")
