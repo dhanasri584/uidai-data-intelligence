@@ -59,7 +59,8 @@ state_fix = {
     "dadra & nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
     "daman & diu": "Dadra & Nagar Haveli And Daman & Diu",
     "dadra and nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
-    "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu"
+    "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu",
+    "pondicherry":"puducherry"
 }
 
 # Standardize state names
