@@ -105,17 +105,11 @@ stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
 stability["stability_score"] = (1 - stability["deviation"]).round(2)
 
 # ---------------- FORECAST ----------------
-forecast = daily.sort_values("date").groupby("state_clean").tail(7)
-
-growth = forecast.groupby("state_clean")["baseline"].pct_change().mean().reset_index()
-growth["growth_rate"] = growth["baseline"].fillna(0)
-
-last_baseline = forecast.groupby("state_clean")["baseline"].last().reset_index()
-forecast_df = pd.merge(last_baseline, growth, on="state_clean")
-
-forecast_df["7_day_forecast"] = (
-    forecast_df["baseline"] * (1 + forecast_df["growth_rate"])
-).round(0)
+AttributeError: This app has encountered an error. The original error message is redacted to prevent data leaks. Full error details have been recorded in the logs (if you're on Streamlit Cloud, click on 'Manage app' in the lower right of your app).
+Traceback:
+File "/mount/src/uidai-data-intelligence/app.py", line 110, in <module>
+    growth = forecast.groupby("state_clean")["baseline"].pct_change().mean().reset_index()
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 # ---------------- MERGE ALL ----------------
 final = stability.merge(coverage, on="state_clean")
