@@ -40,9 +40,13 @@ def load(files):
 
 df = load(files)
 
+# ---------------- DATE & ENROLMENTS ----------------
+df["date"] = pd.to_datetime(df["date"], errors="coerce")
+df["total_enrolments"] = df[["age_0_5", "age_5_17", "age_18_greater"]].sum(axis=1)
+df = df.dropna(subset=["date"])
+
 # ---------------- STATE STANDARDIZATION ----------------
 state_fix = {
-   state_fix = {
     "west bengal": "West Bengal",
     "west bangal": "West Bengal",
     "westbengal": "West Bengal",
@@ -54,9 +58,7 @@ state_fix = {
     "dadra & nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
     "daman & diu": "Dadra & Nagar Haveli And Daman & Diu",
     "dadra and nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
-    "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu",
-}
-
+    "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu"
 }
 
 df["state_clean"] = (
@@ -64,23 +66,8 @@ df["state_clean"] = (
       .str.lower()
       .str.strip()
       .replace(state_fix)
-      .str.title()   # optional, for proper capitalization
+      .str.title()
 )
-daily = df.groupby(["state_clean", "date"]).agg(
-    total_enrolments=("total_enrolments", "sum"),
-    age_0_5=("age_0_5", "sum"),
-    age_5_17=("age_5_17", "sum"),
-    age_18_greater=("age_18_greater", "sum")
-).reset_index()
-
-
-# ---------------- DATE & ENROLMENTS ----------------
-df["date"] = pd.to_datetime(df["date"], errors="coerce")
-
-# Total Enrolments
-df["total_enrolments"] = df[["age_0_5", "age_5_17", "age_18_greater"]].sum(axis=1)
-
-df = df.dropna(subset=["date"])
 
 # ---------------- DAILY AGGREGATION ----------------
 daily = df.groupby(["state_clean", "date"]).agg(
@@ -113,7 +100,6 @@ daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline_7d"]) / dai
 coverage = daily.groupby("state_clean").agg(
     reported_days=("date", "nunique")
 ).reset_index()
-
 coverage["expected_days"] = daily["date"].nunique()
 coverage["coverage_score"] = (coverage["reported_days"] / coverage["expected_days"]).round(2)
 
@@ -122,7 +108,6 @@ volatility = daily.groupby("state_clean").agg(
     mean_enrol=("total_enrolments", "mean"),
     std_enrol=("total_enrolments", "std")
 ).reset_index()
-
 volatility["volatility_index"] = (volatility["std_enrol"] / volatility["mean_enrol"]).round(2)
 
 # ---------------- STABILITY ----------------
@@ -136,21 +121,17 @@ forecast_window = (
     .tail(7)
     .copy()
 )
-
 forecast_window["baseline_growth"] = (
     forecast_window.groupby("state_clean")["baseline_7d"].pct_change()
 )
-
 growth_rate = (
     forecast_window.groupby("state_clean")["baseline_growth"]
     .mean().fillna(0).reset_index()
 )
-
 last_baseline = (
     forecast_window.groupby("state_clean")["baseline_7d"]
     .last().reset_index()
 )
-
 forecast_df = pd.merge(last_baseline, growth_rate, on="state_clean", how="left")
 forecast_df["7_day_forecast"] = (forecast_df["baseline_7d"] * (1 + forecast_df["baseline_growth"])).round(0)
 
