@@ -42,19 +42,37 @@ df = load(files)
 
 # ---------------- STATE STANDARDIZATION ----------------
 state_fix = {
+   state_fix = {
     "west bengal": "West Bengal",
     "west bangal": "West Bengal",
     "westbengal": "West Bengal",
+    "andaman & nicobar islands": "Andaman & Nicobar Islands",
+    "andaman and nicobar islands": "Andaman & Nicobar Islands",
     "orissa": "Odisha",
-    "odissa": "Odisha"
+    "odissa": "Odisha",
+    "dadra & nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu",
+    "dadra & nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
+    "daman & diu": "Dadra & Nagar Haveli And Daman & Diu",
+    "dadra and nagar haveli": "Dadra & Nagar Haveli And Daman & Diu",
+    "dadra and nagar haveli and daman and diu": "Dadra & Nagar Haveli And Daman & Diu",
 }
 
-df["state_original"] = df["state"]
+}
+
 df["state_clean"] = (
-    df["state"].astype(str).str.lower().str.strip()
-    .replace(state_fix)
-    .str.title()
+    df["state"].astype(str)
+      .str.lower()
+      .str.strip()
+      .replace(state_fix)
+      .str.title()   # optional, for proper capitalization
 )
+daily = df.groupby(["state_clean", "date"]).agg(
+    total_enrolments=("total_enrolments", "sum"),
+    age_0_5=("age_0_5", "sum"),
+    age_5_17=("age_5_17", "sum"),
+    age_18_greater=("age_18_greater", "sum")
+).reset_index()
+
 
 # ---------------- DATE & ENROLMENTS ----------------
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
