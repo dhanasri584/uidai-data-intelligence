@@ -59,32 +59,37 @@ df["state_clean"] = (
 # ---------------- DATE & ENROLMENTS ----------------
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
-df["total_enrolments"] = (
-    df["age_0_5"] +
-    df["age_5_17"] +
-    df["age_18_greater"]
-)
+# Total Enrolments
+df["total_enrolments"] = df[["age_0_5", "age_5_17", "age_18_greater"]].sum(axis=1)
 
 df = df.dropna(subset=["date"])
 
 # ---------------- DAILY AGGREGATION ----------------
-daily = (
-    df.groupby(["state_clean", "date"])["total_enrolments"]
-    .sum()
-    .reset_index()
-)
+daily = df.groupby(["state_clean", "date"]).agg(
+    total_enrolments=("total_enrolments", "sum"),
+    age_0_5=("age_0_5", "sum"),
+    age_5_17=("age_5_17", "sum"),
+    age_18_greater=("age_18_greater", "sum")
+).reset_index()
 
 # ---------------- BASELINE SERIES ----------------
-daily["baseline"] = (
+daily["baseline_7d"] = (
     daily.groupby("state_clean")["total_enrolments"]
     .rolling(7, min_periods=1)
     .mean()
     .reset_index(level=0, drop=True)
 )
 
+daily["baseline_14d"] = (
+    daily.groupby("state_clean")["total_enrolments"]
+    .rolling(14, min_periods=1)
+    .mean()
+    .reset_index(level=0, drop=True)
+)
+
 # Avoid division by zero
-daily["baseline"] = daily["baseline"].replace(0, 1e-6)
-daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline"]) / daily["baseline"]
+daily["baseline_7d"] = daily["baseline_7d"].replace(0, 1e-6)
+daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline_7d"]) / daily["baseline_7d"]
 
 # ---------------- COVERAGE SCORE ----------------
 coverage = daily.groupby("state_clean").agg(
@@ -107,7 +112,6 @@ stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
 stability["stability_score"] = (1 - stability["deviation"]).round(2)
 
 # ---------------- FORECAST ----------------
-# last 7 days per state
 forecast_window = (
     daily.sort_values("date")
     .groupby("state_clean")
@@ -115,56 +119,38 @@ forecast_window = (
     .copy()
 )
 
-# percent growth in baseline
 forecast_window["baseline_growth"] = (
-    forecast_window
-    .groupby("state_clean")["baseline"]
-    .pct_change()
+    forecast_window.groupby("state_clean")["baseline_7d"].pct_change()
 )
 
-# average growth rate per state
 growth_rate = (
-    forecast_window
-    .groupby("state_clean")["baseline_growth"]
-    .mean()
-    .fillna(0)
-    .reset_index()
+    forecast_window.groupby("state_clean")["baseline_growth"]
+    .mean().fillna(0).reset_index()
 )
 
-# last baseline value per state
 last_baseline = (
-    forecast_window
-    .groupby("state_clean")["baseline"]
-    .last()
-    .reset_index()
+    forecast_window.groupby("state_clean")["baseline_7d"]
+    .last().reset_index()
 )
 
-# merge forecast inputs
-forecast_df = pd.merge(
-    last_baseline,
-    growth_rate,
-    on="state_clean",
-    how="left"
-)
-
-# compute 7-day forecast
-forecast_df["7_day_forecast"] = (
-    forecast_df["baseline"] * (1 + forecast_df["baseline_growth"])
-).round(0)
+forecast_df = pd.merge(last_baseline, growth_rate, on="state_clean", how="left")
+forecast_df["7_day_forecast"] = (forecast_df["baseline_7d"] * (1 + forecast_df["baseline_growth"])).round(0)
 
 # ---------------- MERGE ALL ----------------
 final = stability.merge(coverage, on="state_clean")
 final = final.merge(volatility, on="state_clean")
 final = final.merge(forecast_df[["state_clean", "7_day_forecast"]], on="state_clean", how="left")
 
-# ---------------- RECOMMENDATIONS ----------------
+# ---------------- RECOMMENDATIONS & ALERTS ----------------
 def uidai_action(row):
-    if row["coverage_score"] < 0.7:
-        return "Data incomplete – audit reporting pipeline"
+    if row["coverage_score"] < 0.5:
+        return "⚠️ Low coverage – audit reporting pipeline"
     if row["volatility_index"] > 0.6:
-        return "High volatility – investigate enrolment spikes"
+        return "⚠️ High volatility – investigate enrolment spikes"
     if row["stability_score"] > 0.8:
-        return "Stable – increase enrolment centers"
+        return "✅ Stable – increase enrolment centers"
+    if row["7_day_forecast"] / row["mean_enrol"] - 1 > 0.2:
+        return "⚡ Rapid increase – scale resources"
     return "Monitor closely"
 
 final["UIDAI_Recommendation"] = final.apply(uidai_action, axis=1)
@@ -196,6 +182,13 @@ with col2:
     )
     st.plotly_chart(fig2, use_container_width=True)
 
+# Age group contribution per state
+st.markdown("## 👶 Age-wise Enrolment Contribution")
+age_df = daily.groupby("state_clean")[["age_0_5","age_5_17","age_18_greater"]].sum()
+age_df_pct = age_df.div(age_df.sum(axis=1), axis=0).reset_index()
+fig3 = px.bar(age_df_pct, x="state_clean", y=["age_0_5","age_5_17","age_18_greater"], title="Age Group Contribution (%)")
+st.plotly_chart(fig3, use_container_width=True)
+
 # ---------------- INSIGHTS ----------------
 st.markdown("## 📝 Strategic Insights for UIDAI")
 st.markdown("""
@@ -203,6 +196,7 @@ st.markdown("""
 • Coverage score highlights unreliable reporting regions  
 • Baseline forecasting enables demand planning without ML  
 • Combined metrics enable targeted audits and resource allocation  
+• Age insights enable better demographic targeting  
 """)
 
-st.success("Premium UIDAI Enrolment Intelligence Prototype Ready")
+st.success("✅ Premium UIDAI Enrolment Intelligence Prototype Ready")
