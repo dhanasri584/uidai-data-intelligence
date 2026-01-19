@@ -1,65 +1,62 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import requests
+import numpy as np
 
+# ---------------- UI CONFIG ----------------
 st.set_page_config(
-    page_title="UIDAI Data Intelligence Platform",
+    page_title="UIDAI Enrolment Intelligence System",
     layout="wide"
 )
 
-st.title("🆔 UIDAI Aadhaar Enrolment Data Intelligence Platform")
-st.caption("State Standardization • Baseline Analysis • Anomaly Detection • Geo-Visualisation")
+st.markdown("""
+<style>
+body { background-color: #0e1117; color: white; }
+.metric-box {
+    background-color:#161b22;
+    padding:20px;
+    border-radius:12px;
+    text-align:center;
+}
+</style>
+""", unsafe_allow_html=True)
 
-# ===================== FILE UPLOAD =====================
-uploaded_files = st.file_uploader(
-    "📤 Upload UIDAI Aadhaar Enrolment CSV files",
-    type=["csv"],
+st.title("🆔 UIDAI Aadhaar Enrolment Intelligence System")
+st.caption("Data Cleaning • Baseline Analytics • Forecasting • Decision Support")
+
+# ---------------- FILE UPLOAD ----------------
+files = st.file_uploader(
+    "Upload UIDAI Enrolment CSV files",
+    type="csv",
     accept_multiple_files=True
 )
 
-if not uploaded_files:
-    st.warning("Please upload all Aadhaar enrolment CSV files to proceed.")
+if not files:
     st.stop()
 
 @st.cache_data
-def load_data(files):
+def load(files):
     return pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
 
-df = load_data(uploaded_files)
+df = load(files)
 
-# ===================== GEOJSON =====================
-@st.cache_data
-def load_india_geojson():
-    url = "https://raw.githubusercontent.com/geohacker/india/master/state/india_state.geojson"
-    return requests.get(url).json()
-
-india_geojson = load_india_geojson()
-
-# ===================== STATE STANDARDIZATION =====================
-state_mapping = {
+# ---------------- STATE STANDARDIZATION ----------------
+state_fix = {
     "west bengal": "West Bengal",
-    "west  bengal": "West Bengal",
     "west bangal": "West Bengal",
     "westbengal": "West Bengal",
-    "andhra pradesh": "Andhra Pradesh",
-    "andaman and nicobar islands": "Andaman & Nicobar Islands",
-    "dadra and nagar haveli": "Dadra & Nagar Haveli",
-    "daman and diu": "Daman & Diu"
+    "orissa": "Odisha",
+    "odissa": "Odisha"
 }
 
 df["state_original"] = df["state"]
-
 df["state_clean"] = (
-    df["state"]
-    .astype(str)
-    .str.lower()
-    .str.strip()
-    .replace(state_mapping)
+    df["state"].astype(str).str.lower().str.strip()
+    .replace(state_fix)
     .str.title()
 )
 
-# ===================== DATE & ENROLMENTS =====================
+# ---------------- DATE & ENROLMENTS ----------------
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 
 df["total_enrolments"] = (
@@ -70,13 +67,14 @@ df["total_enrolments"] = (
 
 df = df.dropna(subset=["date"])
 
-# ===================== BASELINE SERIES =====================
+# ---------------- DAILY AGGREGATION ----------------
 daily = (
     df.groupby(["state_clean", "date"])["total_enrolments"]
     .sum()
     .reset_index()
 )
 
+# ---------------- BASELINE SERIES ----------------
 daily["baseline"] = (
     daily.groupby("state_clean")["total_enrolments"]
     .rolling(7, min_periods=1)
@@ -85,70 +83,91 @@ daily["baseline"] = (
 )
 
 daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline"]) / daily["baseline"]
-daily["anomaly"] = daily["deviation"] > 0.5
 
-latest = daily.sort_values("date").groupby("state_clean").tail(1)
+# ---------------- COVERAGE SCORE ----------------
+coverage = daily.groupby("state_clean").agg(
+    reported_days=("date", "nunique")
+).reset_index()
 
-# ===================== INDIA MAP =====================
-st.markdown("## 🗺️ India Aadhaar Enrolment Heatmap")
+coverage["expected_days"] = daily["date"].nunique()
+coverage["coverage_score"] = (coverage["reported_days"] / coverage["expected_days"]).round(2)
 
-latest["state_match"] = latest["state_clean"].str.upper()
+# ---------------- VOLATILITY ----------------
+volatility = daily.groupby("state_clean").agg(
+    mean_enrol=("total_enrolments", "mean"),
+    std_enrol=("total_enrolments", "std")
+).reset_index()
 
-fig_map = px.choropleth(
-    latest,
-    geojson=india_geojson,
-    featureidkey="properties.ST_NM",
-    locations="state_match",
-    color="total_enrolments",
-    color_continuous_scale="YlOrRd",
-    title="Latest Aadhaar Enrolments by State"
-)
+volatility["volatility_index"] = (volatility["std_enrol"] / volatility["mean_enrol"]).round(2)
 
-fig_map.update_geos(fitbounds="locations", visible=False)
-fig_map.update_layout(height=650)
+# ---------------- STABILITY ----------------
+stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
+stability["stability_score"] = (1 - stability["deviation"]).round(2)
 
-st.plotly_chart(fig_map, use_container_width=True)
+# ---------------- FORECAST ----------------
+forecast = daily.sort_values("date").groupby("state_clean").tail(7)
 
-# ===================== STANDARDIZATION INSIGHT =====================
-st.markdown("## 🧹 State Name Anomalies")
+growth = forecast.groupby("state_clean")["baseline"].pct_change().mean().reset_index()
+growth["growth_rate"] = growth["baseline"].fillna(0)
 
-variants = (
-    df.groupby("state_clean")["state_original"]
-    .nunique()
-    .reset_index(name="variant_count")
-)
+last_baseline = forecast.groupby("state_clean")["baseline"].last().reset_index()
+forecast_df = pd.merge(last_baseline, growth, on="state_clean")
 
-st.dataframe(variants[variants["variant_count"] > 1], use_container_width=True)
+forecast_df["7_day_forecast"] = (
+    forecast_df["baseline"] * (1 + forecast_df["growth_rate"])
+).round(0)
 
-# ===================== VOLATILITY =====================
-st.markdown("## ⚠️ Reporting Volatility")
+# ---------------- MERGE ALL ----------------
+final = stability.merge(coverage, on="state_clean")
+final = final.merge(volatility, on="state_clean")
+final = final.merge(forecast_df, on="state_clean")
 
-volatility = (
-    daily.groupby("state_clean")["deviation"]
-    .mean()
-    .sort_values(ascending=False)
-    .head(10)
-    .reset_index()
-)
+# ---------------- RECOMMENDATIONS ----------------
+def uidai_action(row):
+    if row["coverage_score"] < 0.7:
+        return "Data incomplete – audit reporting pipeline"
+    if row["volatility_index"] > 0.6:
+        return "High volatility – investigate enrolment spikes"
+    if row["stability_score"] > 0.8:
+        return "Stable – increase enrolment centers"
+    return "Monitor closely"
 
-fig_vol = px.bar(
-    volatility,
-    x="deviation",
-    y="state_clean",
-    orientation="h",
-    title="High Volatility States"
-)
+final["UIDAI_Recommendation"] = final.apply(uidai_action, axis=1)
 
-st.plotly_chart(fig_vol, use_container_width=True)
+# ---------------- DASHBOARD ----------------
+st.markdown("## 📊 State-wise Intelligence Summary")
+st.dataframe(final, use_container_width=True)
 
-# ===================== UIDAI RECOMMENDATIONS =====================
-st.markdown("## 📝 UIDAI Actionable Insights")
+# ---------------- VISUALS ----------------
+col1, col2 = st.columns(2)
 
+with col1:
+    fig1 = px.bar(
+        final.sort_values("stability_score"),
+        x="stability_score",
+        y="state_clean",
+        orientation="h",
+        title="Stability Score by State"
+    )
+    st.plotly_chart(fig1, use_container_width=True)
+
+with col2:
+    fig2 = px.bar(
+        final.sort_values("volatility_index"),
+        x="volatility_index",
+        y="state_clean",
+        orientation="h",
+        title="Volatility Index by State"
+    )
+    st.plotly_chart(fig2, use_container_width=True)
+
+# ---------------- INSIGHTS ----------------
+st.markdown("## 📝 Strategic Insights for UIDAI")
 st.markdown("""
-✔ Auto-standardize state names at data entry  
-✔ Flag enrolment drops beyond baseline deviation  
-✔ Prioritize audits in high volatility states  
-✔ Use baseline trends for staff & kit allocation  
+• Standardizing state names prevents analytical fragmentation  
+• Coverage score highlights unreliable reporting regions  
+• Baseline forecasting enables demand planning without ML  
+• Combined metrics enable targeted audits and resource allocation  
 """)
 
-st.success("✅ UIDAI Data Intelligence Platform Ready")
+st.success("Premium UIDAI Enrolment Intelligence Prototype Ready")
