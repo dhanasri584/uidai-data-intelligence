@@ -38,55 +38,12 @@ files = st.file_uploader(
     accept_multiple_files=True
 )
 
-if not files:
-    st.stop()
-
-@st.cache_data
-def load_default_data():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    data_dir = os.path.join(BASE_DIR, "data")
-
-    files = [
-        "api_data_aadhar_enrolment_0_500000.csv",
-        "api_data_aadhar_enrolment_500000_1000000.csv",
-        "api_data_aadhar_enrolment_1000000_1006029.csv"
-    ]
-
-    dfs = [pd.read_csv(os.path.join(data_dir, f)) for f in files]
-    return pd.concat(dfs, ignore_index=True)
-
-if data_mode == "Upload Custom CSV":
-    uploaded_files = st.sidebar.file_uploader(
-        "Upload enrolment CSV file(s)",
-        type=["csv"],
-        accept_multiple_files=True
-    )
-
-    if uploaded_files:
-        df_list = [pd.read_csv(file) for file in uploaded_files]
-        df = pd.concat(df_list, ignore_index=True)
-        st.sidebar.success("Custom dataset loaded successfully")
-    else:
-        st.warning("Please upload at least one CSV file")
-        st.stop()
-else:
-    df = load_default_data()
-
-required_cols = {
-    "state", "date", "age_0_5", "age_5_17", "age_18_greater"
-}
-
-if not required_cols.issubset(df.columns):
-    st.error("Uploaded CSV does not match required UIDAI format")
-    st.stop()
-
 
 # ---------------- DATE & ENROLMENTS ----------------
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
 df["total_enrolments"] = df[["age_0_5", "age_5_17", "age_18_greater"]].sum(axis=1)
 df = df.dropna(subset=["date"])
 
-# ---------------- STATE STANDARDIZATION ----------------
 # ---------------- STATE STANDARDIZATION ----------------
 state_fix = {
     "west bengal": "West Bengal",
