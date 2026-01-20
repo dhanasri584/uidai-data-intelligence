@@ -21,7 +21,7 @@ body { background-color: #0e1117; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🆔 UIDAI Aadhaar Enrolment Intelligence System")
+st.title(" UIDAI Aadhaar Enrolment Intelligence System")
 st.caption("Data Cleaning • Baseline Analytics • Forecasting • Decision Support")
 
 # ---------------- FILE UPLOAD ----------------
@@ -200,14 +200,14 @@ with col2:
     st.plotly_chart(fig2, use_container_width=True)
 
 # Age group contribution per state
-st.markdown("## 👶 Age-wise Enrolment Contribution")
+st.markdown("##  Age-wise Enrolment Contribution")
 age_df = daily.groupby("state_clean")[["age_0_5","age_5_17","age_18_greater"]].sum()
 age_df_pct = age_df.div(age_df.sum(axis=1), axis=0).reset_index()
 fig3 = px.bar(age_df_pct, x="state_clean", y=["age_0_5","age_5_17","age_18_greater"], title="Age Group Contribution (%)")
 st.plotly_chart(fig3, use_container_width=True)
 
 # ---------------- INSIGHTS ----------------
-st.markdown("## 📝 Strategic Insights for UIDAI")
+st.markdown("##  Strategic Insights for UIDAI")
 st.markdown("""
 • Standardizing state names prevents analytical fragmentation  
 • Coverage score highlights unreliable reporting regions  
@@ -216,4 +216,4 @@ st.markdown("""
 • Age insights enable better demographic targeting  
 """)
 
-st.success("✅ Premium UIDAI Enrolment Intelligence Prototype Ready")
+st.success(" Premium UIDAI Enrolment Intelligence Prototype Ready")
