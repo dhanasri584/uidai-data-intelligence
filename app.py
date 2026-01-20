@@ -3,19 +3,13 @@ import pandas as pd
 import plotly.express as px
 import numpy as np
 
-st.sidebar.title("📁 Data Source")
-data_mode = st.sidebar.radio(
-    "Choose dataset:",
-    ["Use Official UIDAI Dataset", "Upload Custom CSV"]
-)
-
-
-# ---------------- UI CONFIG ----------------
+# ---------------- PAGE CONFIG (MUST BE FIRST) ----------------
 st.set_page_config(
     page_title="UIDAI Enrolment Intelligence System",
     layout="wide"
 )
 
+# ---------------- CUSTOM UI ----------------
 st.markdown("""
 <style>
 body { background-color: #0e1117; color: white; }
@@ -28,16 +22,33 @@ body { background-color: #0e1117; color: white; }
 </style>
 """, unsafe_allow_html=True)
 
-st.title(" UIDAI Aadhaar Enrolment Intelligence System")
+st.title("🆔 UIDAI Aadhaar Enrolment Intelligence System")
 st.caption("Data Cleaning • Baseline Analytics • Forecasting • Decision Support")
 
 # ---------------- FILE UPLOAD ----------------
 files = st.file_uploader(
-    "Upload UIDAI Enrolment CSV files",
+    "📤 Upload UIDAI Enrolment CSV files",
     type="csv",
     accept_multiple_files=True
 )
 
+if not files:
+    st.info("Upload one or more UIDAI enrolment CSV files to begin")
+    st.stop()
+
+# ---------------- LOAD DATA ----------------
+df = pd.concat([pd.read_csv(f) for f in files], ignore_index=True)
+
+st.subheader("📄 Raw Data Preview")
+st.dataframe(df.head())
+
+# ---------------- BASIC COLUMN CHECK ----------------
+required_cols = ["state", "date", "age_0_5", "age_5_17", "age_18_greater"]
+missing = [c for c in required_cols if c not in df.columns]
+
+if missing:
+    st.error(f"Missing required columns: {missing}")
+    st.stop()
 
 # ---------------- DATE & ENROLMENTS ----------------
 df["date"] = pd.to_datetime(df["date"], errors="coerce")
@@ -49,41 +60,26 @@ state_fix = {
     "west bengal": "West Bengal",
     "west bangal": "West Bengal",
     "westbengal": "West Bengal",
-    "andaman & nicobar islands": "Andaman & Nicobar Islands",
-    "andaman and nicobar islands": "Andaman & Nicobar Islands",
     "orissa": "Odisha",
     "odissa": "Odisha",
-    "dadra & nagar haveli ": "Dadra & Nagar Haveli ",
-   
-    "daman & diu": "Daman & Diu",
+    "andaman & nicobar islands": "Andaman & Nicobar Islands",
+    "andaman and nicobar islands": "Andaman & Nicobar Islands",
+    "dadra & nagar haveli": "Dadra & Nagar Haveli",
     "dadra and nagar haveli": "Dadra & Nagar Haveli",
-    "dadra and nagar haveli ": "Dadra & Nagar Haveli ",
-    "pondicherry":"puducherry",
-    "jammu & kashmir":"jammu and kashmir" 
+    "daman & diu": "Daman & Diu",
+    "pondicherry": "Puducherry",
+    "jammu & kashmir": "Jammu And Kashmir"
 }
 
-# Standardize state names
 df["state_clean"] = (
-    df["state"].astype(str)
-      .str.lower()
-      .str.strip()
-      .replace(state_fix)
+    df["state"]
+    .astype(str)
+    .str.lower()
+    .str.strip()
+    .replace(state_fix)
 )
 
-# Optional: make a display-friendly version
 df["state_display"] = df["state_clean"].str.title()
-
-# ---------------- AGGREGATION ----------------
-# Group by the cleaned state
-daily = df.groupby(["state_clean", "date"]).agg(
-    total_enrolments=("total_enrolments", "sum"),
-    age_0_5=("age_0_5", "sum"),
-    age_5_17=("age_5_17", "sum"),
-    age_18_greater=("age_18_greater", "sum")
-).reset_index()
-
-# Make sure no duplicate states exist
-daily = daily.drop_duplicates(subset=["state_clean", "date"])
 
 # ---------------- DAILY AGGREGATION ----------------
 daily = df.groupby(["state_clean", "date"]).agg(
@@ -101,21 +97,16 @@ daily["baseline_7d"] = (
     .reset_index(level=0, drop=True)
 )
 
-daily["baseline_14d"] = (
-    daily.groupby("state_clean")["total_enrolments"]
-    .rolling(14, min_periods=1)
-    .mean()
-    .reset_index(level=0, drop=True)
-)
-
-# Avoid division by zero
-daily["baseline_7d"] = daily["baseline_7d"].replace(0, 1e-6)
-daily["deviation"] = abs(daily["total_enrolments"] - daily["baseline_7d"]) / daily["baseline_7d"]
+daily["deviation"] = (
+    abs(daily["total_enrolments"] - daily["baseline_7d"]) /
+    daily["baseline_7d"].replace(0, np.nan)
+).fillna(0)
 
 # ---------------- COVERAGE SCORE ----------------
 coverage = daily.groupby("state_clean").agg(
     reported_days=("date", "nunique")
 ).reset_index()
+
 coverage["expected_days"] = daily["date"].nunique()
 coverage["coverage_score"] = (coverage["reported_days"] / coverage["expected_days"]).round(2)
 
@@ -124,49 +115,40 @@ volatility = daily.groupby("state_clean").agg(
     mean_enrol=("total_enrolments", "mean"),
     std_enrol=("total_enrolments", "std")
 ).reset_index()
-volatility["volatility_index"] = (volatility["std_enrol"] / volatility["mean_enrol"]).round(2)
+
+volatility["volatility_index"] = (volatility["std_enrol"] / volatility["mean_enrol"]).fillna(0).round(2)
 
 # ---------------- STABILITY ----------------
 stability = daily.groupby("state_clean")["deviation"].mean().reset_index()
-stability["stability_score"] = (1 - stability["deviation"]).round(2)
+stability["stability_score"] = (1 - stability["deviation"]).clip(0, 1).round(2)
 
-# ---------------- FORECAST ----------------
-forecast_window = (
-    daily.sort_values("date")
-    .groupby("state_clean")
-    .tail(7)
-    .copy()
-)
-forecast_window["baseline_growth"] = (
-    forecast_window.groupby("state_clean")["baseline_7d"].pct_change()
-)
-growth_rate = (
-    forecast_window.groupby("state_clean")["baseline_growth"]
-    .mean().fillna(0).reset_index()
-)
-last_baseline = (
-    forecast_window.groupby("state_clean")["baseline_7d"]
-    .last().reset_index()
-)
-forecast_df = pd.merge(last_baseline, growth_rate, on="state_clean", how="left")
-forecast_df["7_day_forecast"] = (forecast_df["baseline_7d"] * (1 + forecast_df["baseline_growth"])).round(0)
+# ---------------- FORECAST (NO ML) ----------------
+recent = daily.sort_values("date").groupby("state_clean").tail(7)
+growth = recent.groupby("state_clean")["baseline_7d"].pct_change().mean().fillna(0).reset_index()
+last_base = recent.groupby("state_clean")["baseline_7d"].last().reset_index()
 
-# ---------------- MERGE ALL ----------------
-final = stability.merge(coverage, on="state_clean")
-final = final.merge(volatility, on="state_clean")
-final = final.merge(forecast_df[["state_clean", "7_day_forecast"]], on="state_clean", how="left")
+forecast = pd.merge(last_base, growth, on="state_clean")
+forecast["7_day_forecast"] = (forecast["baseline_7d"] * (1 + forecast["baseline_7d_y"])).round(0)
 
-# ---------------- RECOMMENDATIONS & ALERTS ----------------
+# ---------------- FINAL MERGE ----------------
+final = (
+    stability
+    .merge(coverage, on="state_clean")
+    .merge(volatility, on="state_clean")
+    .merge(forecast[["state_clean", "7_day_forecast"]], on="state_clean", how="left")
+)
+
+# ---------------- UIDAI ACTION ENGINE ----------------
 def uidai_action(row):
     if row["coverage_score"] < 0.5:
-        return "⚠️ Low coverage – audit reporting pipeline"
+        return "⚠️ Audit reporting pipeline"
     if row["volatility_index"] > 0.6:
-        return "⚠️ High volatility – investigate enrolment spikes"
+        return "⚠️ Investigate spikes"
     if row["stability_score"] > 0.8:
-        return "✅ Stable – increase enrolment centers"
-    if row["7_day_forecast"] / row["mean_enrol"] - 1 > 0.2:
-        return "⚡ Rapid increase – scale resources"
-    return "Monitor closely"
+        return "✅ Expand enrolment centers"
+    if row["7_day_forecast"] > row["mean_enrol"] * 1.2:
+        return "⚡ Scale staff & kits"
+    return "Monitor"
 
 final["UIDAI_Recommendation"] = final.apply(uidai_action, axis=1)
 
@@ -175,9 +157,9 @@ st.markdown("## 📊 State-wise Intelligence Summary")
 st.dataframe(final, use_container_width=True)
 
 # ---------------- VISUALS ----------------
-col1, col2 = st.columns(2)
+c1, c2 = st.columns(2)
 
-with col1:
+with c1:
     fig1 = px.bar(
         final.sort_values("stability_score"),
         x="stability_score",
@@ -187,7 +169,7 @@ with col1:
     )
     st.plotly_chart(fig1, use_container_width=True)
 
-with col2:
+with c2:
     fig2 = px.bar(
         final.sort_values("volatility_index"),
         x="volatility_index",
@@ -197,21 +179,28 @@ with col2:
     )
     st.plotly_chart(fig2, use_container_width=True)
 
-# Age group contribution per state
-st.markdown("##  Age-wise Enrolment Contribution")
+# ---------------- AGE DISTRIBUTION ----------------
+st.markdown("## 👶🧑‍🎓👴 Age-wise Enrolment Contribution")
+
 age_df = daily.groupby("state_clean")[["age_0_5","age_5_17","age_18_greater"]].sum()
-age_df_pct = age_df.div(age_df.sum(axis=1), axis=0).reset_index()
-fig3 = px.bar(age_df_pct, x="state_clean", y=["age_0_5","age_5_17","age_18_greater"], title="Age Group Contribution (%)")
+age_pct = age_df.div(age_df.sum(axis=1), axis=0).reset_index()
+
+fig3 = px.bar(
+    age_pct,
+    x="state_clean",
+    y=["age_0_5","age_5_17","age_18_greater"],
+    title="Age Group Contribution (%)"
+)
 st.plotly_chart(fig3, use_container_width=True)
 
 # ---------------- INSIGHTS ----------------
-st.markdown("##  Strategic Insights for UIDAI")
+st.markdown("## 🧠 Strategic Insights for UIDAI")
 st.markdown("""
-• Standardizing state names prevents analytical fragmentation  
-• Coverage score highlights unreliable reporting regions  
-• Baseline forecasting enables demand planning without ML  
-• Combined metrics enable targeted audits and resource allocation  
-• Age insights enable better demographic targeting  
+• Standardization prevents fragmented national statistics  
+• Coverage score identifies unreliable reporting regions  
+• Baseline forecasting supports planning without ML  
+• Volatility flags operational anomalies  
+• Recommendations guide audits & center expansion  
 """)
 
-st.success(" Premium UIDAI Enrolment Intelligence Prototype Ready")
+st.success("✅ Premium UIDAI Enrolment Intelligence Prototype Ready")
